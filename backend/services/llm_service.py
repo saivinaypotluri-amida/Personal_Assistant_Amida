@@ -195,7 +195,7 @@ Respond in JSON format:
                 html += f"""
                 <div class="email-item">
                     <div class="email-header">{idx}. {email.get('subject', 'No Subject')}</div>
-                    <div class="email-meta">From: {email.get('from', 'Unknown')} | Date: {email.get('date', 'N/A')}</div>
+                    <div class="email-meta">From: {email.get('from_email', email.get('from', 'Unknown'))} | Date: {email.get('date', 'N/A')}</div>
                     <div class="email-summary">{email.get('summary', 'No summary available')}</div>
                 """
                 
@@ -245,7 +245,7 @@ Respond in JSON format:
                 "text": {
                     "type": "mrkdwn",
                     "text": f"*{idx}. {email.get('subject', 'No Subject')}*\n"
-                            f"_From: {email.get('from', 'Unknown')} | {email.get('date', 'N/A')}_\n"
+                            f"_From: {email.get('from_email', email.get('from', 'Unknown'))} | {email.get('date', 'N/A')}_\n"
                             f"{email.get('summary', 'No summary available')}"
                 }
             }

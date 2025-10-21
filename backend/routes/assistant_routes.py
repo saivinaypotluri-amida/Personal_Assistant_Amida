@@ -117,7 +117,7 @@ async def summarize_emails(
             
             summaries.append({
                 'subject': email['subject'],
-                'from': email['from'],
+                'from_email': email['from'],
                 'date': email['date'],
                 'summary': summary_result['summary'],
                 'meeting_links': summary_result['meeting_links']
