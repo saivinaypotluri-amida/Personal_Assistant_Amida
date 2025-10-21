@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import axios from 'axios'
+import api from '../api/axios'
 import {
   Mail,
   Calendar,
@@ -37,7 +37,7 @@ export default function Dashboard() {
 
   const fetchAuthStatus = async () => {
     try {
-      const response = await axios.get('/api/auth/status')
+      const response = await api.get('/auth/status')
       setAuthStatus(response.data)
     } catch (err) {
       console.error('Failed to fetch auth status:', err)
@@ -46,7 +46,7 @@ export default function Dashboard() {
 
   const handleGoogleAuth = async () => {
     try {
-      const response = await axios.get('/api/auth/google/url')
+      const response = await api.get('/auth/google/url')
       window.location.href = response.data.url
     } catch (err) {
       setError('Failed to initiate Google authentication')
@@ -55,7 +55,7 @@ export default function Dashboard() {
 
   const handleSlackAuth = async () => {
     try {
-      const response = await axios.get('/api/auth/slack/url')
+      const response = await api.get('/auth/slack/url')
       window.location.href = response.data.url
     } catch (err) {
       setError('Failed to initiate Slack authentication')
@@ -69,7 +69,7 @@ export default function Dashboard() {
     setEmailSummary(null)
 
     try {
-      const response = await axios.post('/api/assistant/email-summary', {
+      const response = await api.post('/assistant/email-summary', {
         days: parseInt(emailDays),
         source: 'portal'
       })
@@ -88,7 +88,7 @@ export default function Dashboard() {
     setMeetingResult(null)
 
     try {
-      const response = await axios.post('/api/assistant/schedule-meeting', {
+      const response = await api.post('/assistant/schedule-meeting', {
         attendees: attendees.split(',').map(e => e.trim()),
         duration_minutes: parseInt(duration),
         title: meetingTitle,

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
+import api from '../api/axios'
 
 const AuthContext = createContext()
 
@@ -14,7 +15,6 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
       fetchUser()
     } else {
       setLoading(false)
@@ -23,7 +23,7 @@ export function AuthProvider({ children }) {
 
   const fetchUser = async () => {
     try {
-      const response = await axios.get('/api/auth/me')
+      const response = await api.get('/auth/me')
       setUser(response.data)
     } catch (error) {
       console.error('Failed to fetch user:', error)
@@ -41,10 +41,10 @@ export function AuthProvider({ children }) {
     const response = await axios.post('/api/auth/login', formData)
     const { access_token, user: userData } = response.data
     
+    // Store token - axios interceptor will handle adding it to requests
     localStorage.setItem('token', access_token)
     setToken(access_token)
     setUser(userData)
-    axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
     
     return userData
   }
@@ -59,10 +59,10 @@ export function AuthProvider({ children }) {
     
     const { access_token, user: userData } = response.data
     
+    // Store token - axios interceptor will handle adding it to requests
     localStorage.setItem('token', access_token)
     setToken(access_token)
     setUser(userData)
-    axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
     
     return userData
   }
@@ -71,7 +71,6 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token')
     setToken(null)
     setUser(null)
-    delete axios.defaults.headers.common['Authorization']
   }
 
   const value = {

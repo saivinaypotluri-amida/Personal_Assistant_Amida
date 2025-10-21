@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import axios from 'axios'
+import api from '../api/axios'
 import {
   Users,
   Activity,
@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   const fetchUsers = async () => {
     setLoading(true)
     try {
-      const response = await axios.get('/api/admin/users')
+      const response = await api.get('/admin/users')
       setUsers(response.data)
     } catch (err) {
       setError('Failed to fetch users')
@@ -47,7 +47,7 @@ export default function AdminDashboard() {
   const fetchLogs = async () => {
     setLoading(true)
     try {
-      const response = await axios.get('/api/admin/logs?limit=50')
+      const response = await api.get('/admin/logs?limit=50')
       setLogs(response.data)
     } catch (err) {
       setError('Failed to fetch logs')
@@ -59,7 +59,7 @@ export default function AdminDashboard() {
   const fetchCosts = async () => {
     setLoading(true)
     try {
-      const response = await axios.get('/api/admin/costs?days=30')
+      const response = await api.get('/admin/costs?days=30')
       setCosts(response.data)
     } catch (err) {
       setError('Failed to fetch costs')
@@ -71,7 +71,7 @@ export default function AdminDashboard() {
   const fetchStats = async () => {
     setLoading(true)
     try {
-      const response = await axios.get('/api/admin/stats/overall?days=30')
+      const response = await api.get('/admin/stats/overall?days=30')
       setStats(response.data)
     } catch (err) {
       setError('Failed to fetch stats')
@@ -82,7 +82,7 @@ export default function AdminDashboard() {
 
   const toggleUserActive = async (userId) => {
     try {
-      await axios.patch(`/api/admin/users/${userId}/toggle-active`)
+      await api.patch(`/admin/users/${userId}/toggle-active`)
       fetchUsers()
     } catch (err) {
       setError('Failed to toggle user status')
@@ -93,7 +93,7 @@ export default function AdminDashboard() {
     if (!confirm('Are you sure you want to delete this user?')) return
     
     try {
-      await axios.delete(`/api/admin/users/${userId}`)
+      await api.delete(`/admin/users/${userId}`)
       fetchUsers()
     } catch (err) {
       setError('Failed to delete user')
