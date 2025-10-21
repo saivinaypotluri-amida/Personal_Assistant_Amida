@@ -371,9 +371,19 @@ async def handle_mention(event, client):
 
 @router.post("/events")
 async def slack_events(request: Request):
-    """Handle Slack events"""
+    """Handle Slack events including URL verification challenge"""
+    
+    # Parse the request body
+    body = await request.json()
+    
+    # Handle URL verification challenge from Slack
+    if body.get("type") == "url_verification":
+        return {"challenge": body.get("challenge")}
+    
+    # Handle other events with Slack handler
     if not handler:
         return {"error": "Slack bot not configured"}
+    
     return await handler.handle(request)
 
 
@@ -382,4 +392,5 @@ async def slack_commands(request: Request):
     """Handle Slack slash commands"""
     if not handler:
         return {"error": "Slack bot not configured"}
+    
     return await handler.handle(request)
