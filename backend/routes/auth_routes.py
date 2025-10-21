@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from typing import Dict, Any
@@ -288,7 +289,8 @@ async def google_oauth_callback(code: str, state: str, db: Session = Depends(get
     
     db.commit()
     
-    return {"message": "Google account connected successfully", "redirect": f"{settings.FRONTEND_URL}/dashboard"}
+    # Redirect back to frontend dashboard
+    return RedirectResponse(url=f"{settings.FRONTEND_URL}/dashboard?google=connected")
 
 
 # Slack OAuth
@@ -403,7 +405,8 @@ async def slack_oauth_callback(code: str, state: str, db: Session = Depends(get_
     
     db.commit()
     
-    return {"message": "Slack workspace connected successfully", "redirect": f"{settings.FRONTEND_URL}/dashboard"}
+    # Redirect back to frontend dashboard
+    return RedirectResponse(url=f"{settings.FRONTEND_URL}/dashboard?slack=connected")
 
 
 # Azure OpenAI Configuration  
