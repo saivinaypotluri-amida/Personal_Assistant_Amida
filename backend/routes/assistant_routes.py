@@ -4,7 +4,7 @@ from typing import List
 from datetime import datetime, timedelta
 
 from database import get_db
-from models import User, Credential, ActivityLog, CostTracking
+from models import User, Credential, ActivityLog, CostTracking, OAuthConfig as OAuthConfigModel
 from schemas import (
     EmailSummaryRequest,
     EmailSummaryResponse,
@@ -84,7 +84,22 @@ async def summarize_emails(
             'client_secret': google_cred.additional_data.get('client_secret')
         })
         
-        llm_service = LLMService()
+        # Check if user has Azure OpenAI configured
+        azure_config = db.query(Credential).filter(
+            Credential.user_id == current_user.id,
+            Credential.service_name == "azure_openai"
+        ).first()
+        
+        # Initialize LLM service with user's config or None
+        if azure_config and azure_config.additional_data:
+            llm_service = LLMService(
+                api_key=azure_config.additional_data.get('api_key'),
+                endpoint=azure_config.additional_data.get('endpoint'),
+                deployment=azure_config.additional_data.get('deployment')
+            )
+        else:
+            # Use default config (may be None - will use fallback)
+            llm_service = LLMService()
         
         # Fetch emails
         emails = await gmail_service.get_emails(

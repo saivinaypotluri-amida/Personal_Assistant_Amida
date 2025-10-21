@@ -9,12 +9,22 @@ from typing import Dict, Any, Optional
 
 class CommandParser:
     def __init__(self, api_key: str = None, endpoint: str = None, deployment: str = None):
-        self.client = AzureOpenAI(
-            api_key=api_key or settings.AZURE_OPENAI_KEY,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-            azure_endpoint=endpoint or settings.AZURE_OPENAI_ENDPOINT
-        )
+        self.api_key = api_key or settings.AZURE_OPENAI_KEY
+        self.endpoint = endpoint or settings.AZURE_OPENAI_ENDPOINT
         self.deployment = deployment or settings.AZURE_OPENAI_DEPLOYMENT
+        
+        # Only initialize client if credentials are provided
+        self.client = None
+        if self.api_key and self.endpoint and self.deployment:
+            try:
+                self.client = AzureOpenAI(
+                    api_key=self.api_key,
+                    api_version=settings.AZURE_OPENAI_API_VERSION,
+                    azure_endpoint=self.endpoint
+                )
+            except Exception as e:
+                print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
+                self.client = None
     
     async def parse_email_summary_command(self, text: str) -> Dict[str, Any]:
         """
@@ -25,6 +35,10 @@ class CommandParser:
         - "summarize emails from Jan 1 to Jan 5"
         - "7 days" or just "3"
         """
+        
+        # Fallback if Azure OpenAI not configured
+        if not self.client:
+            return self._fallback_parse_email_command(text)
         
         prompt = f"""Parse this email summary command and extract the time range.
 
@@ -85,6 +99,10 @@ Examples:
         - "schedule with john@ex.com and jane@ex.com for 1 hour tomorrow at 2pm called Team Sync"
         - "john@ex.com,jane@ex.com 30 Project Review"
         """
+        
+        # Fallback if Azure OpenAI not configured
+        if not self.client:
+            return self._fallback_parse_schedule_command(text)
         
         prompt = f"""Parse this meeting scheduling command and extract the details.
 
@@ -148,3 +166,66 @@ Examples:
         except Exception as e:
             print(f"Error parsing schedule command: {e}")
             raise ValueError(f"Could not parse command. Please use format: 'email@example.com for 30 minutes' or 'email1,email2 30 Meeting Title'")
+    
+    def _fallback_parse_email_command(self, text: str) -> Dict[str, Any]:
+        """Simple regex-based parsing when Azure OpenAI is not available"""
+        import re
+        
+        text = text.lower().strip()
+        
+        # Default to 1 day
+        days = 1
+        
+        # Try to extract number
+        if text:
+            # Look for patterns like "7 days", "last 3 days", "3", "7"
+            number_match = re.search(r'(\d+)', text)
+            if number_match:
+                days = int(number_match.group(1))
+            elif 'yesterday' in text:
+                days = 1
+            elif 'week' in text:
+                days = 7
+            elif 'month' in text:
+                days = 30
+        
+        return {
+            "days": days,
+            "start_date": None,
+            "end_date": None
+        }
+    
+    def _fallback_parse_schedule_command(self, text: str) -> Dict[str, Any]:
+        """Simple parsing when Azure OpenAI is not available"""
+        import re
+        
+        # Extract emails
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        attendees = re.findall(email_pattern, text)
+        
+        if not attendees:
+            raise ValueError("No email addresses found in command")
+        
+        # Extract duration (default 30)
+        duration = 30
+        duration_match = re.search(r'(\d+)\s*(?:minutes?|mins?|m\b)', text, re.IGNORECASE)
+        if duration_match:
+            duration = int(duration_match.group(1))
+        elif 'hour' in text.lower():
+            duration = 60
+        
+        # Extract title (everything after emails and duration)
+        title = "Meeting"
+        # Simple heuristic: look for words after "called" or after duration
+        if 'called' in text.lower():
+            title_match = re.search(r'called\s+(.+)', text, re.IGNORECASE)
+            if title_match:
+                title = title_match.group(1).strip()
+        
+        return {
+            "attendees": attendees,
+            "duration_minutes": duration,
+            "title": title,
+            "date": None,
+            "time": None
+        }

@@ -26,6 +26,11 @@ class LLMService:
     async def summarize_email(self, email_content: Dict[str, Any]) -> Dict[str, Any]:
         """Summarize email content in 30-40 words and extract meeting links"""
         
+        # Check if Azure OpenAI is configured
+        if not self.client:
+            print("Warning: Azure OpenAI not configured, using fallback summary")
+            return self._fallback_summarize(email_content)
+        
         prompt = f"""Analyze the following email and provide:
 1. A concise summary in 30-40 words
 2. Extract any meeting links (Zoom, Google Meet, Teams, etc.) found in the email
@@ -53,7 +58,16 @@ Respond in JSON format:
                 max_tokens=200
             )
             
-            content = response.choices[0].message.content
+            content = response.choices[0].message.content.strip()
+            
+            # Try to parse JSON from response
+            # Remove markdown code blocks if present
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+                content = content.strip()
+            
             result = json.loads(content)
             
             tokens_used = response.usage.total_tokens
@@ -63,13 +77,45 @@ Respond in JSON format:
                 "meeting_links": result.get("meeting_links", []),
                 "tokens_used": tokens_used
             }
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON from Azure OpenAI response: {e}")
+            print(f"Response content: {content if 'content' in locals() else 'No content'}")
+            return self._fallback_summarize(email_content)
         except Exception as e:
             print(f"Error in summarize_email: {e}")
-            return {
-                "summary": "Error summarizing email.",
-                "meeting_links": [],
-                "tokens_used": 0
-            }
+            return self._fallback_summarize(email_content)
+    
+    def _fallback_summarize(self, email_content: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback summarization when Azure OpenAI is not available"""
+        import re
+        
+        subject = email_content.get('subject', 'No Subject')
+        body = email_content.get('body', '')[:200]  # First 200 chars
+        from_email = email_content.get('from', 'Unknown')
+        
+        # Simple summary
+        summary = f"Email from {from_email} regarding {subject}. {body[:100]}..."
+        if len(summary) > 150:
+            summary = summary[:147] + "..."
+        
+        # Extract meeting links using regex
+        meeting_links = []
+        link_patterns = [
+            r'https://meet\.google\.com/[a-z-]+',
+            r'https://zoom\.us/j/\d+',
+            r'https://teams\.microsoft\.com/l/meetup-join/[^\s]+',
+            r'https://[^\s]+\.zoom\.us/[^\s]+'
+        ]
+        
+        for pattern in link_patterns:
+            matches = re.findall(pattern, body)
+            meeting_links.extend(matches)
+        
+        return {
+            "summary": summary,
+            "meeting_links": list(set(meeting_links)),  # Remove duplicates
+            "tokens_used": 0
+        }
     
     async def format_email_digest(self, summaries: List[Dict[str, Any]]) -> str:
         """Format email summaries into a nice HTML email digest"""
