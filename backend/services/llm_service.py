@@ -6,12 +6,22 @@ import json
 
 class LLMService:
     def __init__(self, api_key: str = None, endpoint: str = None, deployment: str = None):
-        self.client = AzureOpenAI(
-            api_key=api_key or settings.AZURE_OPENAI_KEY,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-            azure_endpoint=endpoint or settings.AZURE_OPENAI_ENDPOINT
-        )
+        self.api_key = api_key or settings.AZURE_OPENAI_KEY
+        self.endpoint = endpoint or settings.AZURE_OPENAI_ENDPOINT
         self.deployment = deployment or settings.AZURE_OPENAI_DEPLOYMENT
+        
+        # Only initialize client if credentials are provided
+        self.client = None
+        if self.api_key and self.endpoint and self.deployment:
+            try:
+                self.client = AzureOpenAI(
+                    api_key=self.api_key,
+                    api_version=settings.AZURE_OPENAI_API_VERSION,
+                    azure_endpoint=self.endpoint
+                )
+            except Exception as e:
+                print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
+                self.client = None
     
     async def summarize_email(self, email_content: Dict[str, Any]) -> Dict[str, Any]:
         """Summarize email content in 30-40 words and extract meeting links"""
