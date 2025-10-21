@@ -35,11 +35,22 @@ class Token(BaseModel):
 
 
 # OAuth Configuration
-class OAuthConfig(BaseModel):
+class OAuthConfigCreate(BaseModel):
     service: str  # 'google', 'slack', 'azure_openai'
-    client_id: Optional[str] = None
-    client_secret: Optional[str] = None
+    client_id: str
+    client_secret: str
     additional_config: Optional[Dict[str, Any]] = None
+
+
+class OAuthConfigResponse(BaseModel):
+    id: int
+    service: str
+    client_id: str  # Masked for security
+    is_configured: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 
 # Email Summary Request

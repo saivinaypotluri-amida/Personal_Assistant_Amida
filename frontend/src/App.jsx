@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import AdminDashboard from './pages/AdminDashboard'
+import ConfigureOAuth from './pages/ConfigureOAuth'
 import { AuthProvider, useAuth } from './context/AuthContext'
 
 function PrivateRoute({ children, adminOnly = false }) {
@@ -38,6 +39,14 @@ function App() {
             element={
               <PrivateRoute>
                 <Dashboard />
+              </PrivateRoute>
+            } 
+          />
+          <Route 
+            path="/configure-oauth" 
+            element={
+              <PrivateRoute>
+                <ConfigureOAuth />
               </PrivateRoute>
             } 
           />

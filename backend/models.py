@@ -37,6 +37,22 @@ class Credential(Base):
     user = relationship("User", back_populates="credentials")
 
 
+class OAuthConfig(Base):
+    __tablename__ = "oauth_configs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    service_name = Column(String, nullable=False)  # 'google', 'slack', 'azure_openai'
+    client_id = Column(Text, nullable=True)
+    client_secret = Column(Text, nullable=True)
+    additional_config = Column(JSON, nullable=True)  # For service-specific configs
+    is_configured = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User")
+
+
 class ActivityLog(Base):
     __tablename__ = "activity_logs"
     

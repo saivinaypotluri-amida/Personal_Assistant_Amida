@@ -20,5 +20,6 @@ def get_db():
 
 
 def init_db():
-    import models
+    from models import User, Credential, ActivityLog, CostTracking, OAuthConfig
     Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")

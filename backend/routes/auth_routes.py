@@ -7,8 +7,8 @@ import httpx
 import json
 
 from database import get_db
-from models import User, Credential
-from schemas import UserCreate, UserLogin, Token, UserResponse, OAuthConfig
+from models import User, Credential, OAuthConfig as OAuthConfigModel
+from schemas import UserCreate, UserLogin, Token, UserResponse, OAuthConfigCreate, OAuthConfigResponse
 from auth import (
     get_password_hash,
     verify_password,
@@ -96,13 +96,102 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+# Save OAuth Configuration
+@router.post("/config/save", response_model=OAuthConfigResponse)
+async def save_oauth_config(
+    config: OAuthConfigCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save OAuth configuration for a service"""
+    
+    # Check if config already exists
+    existing = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == current_user.id,
+        OAuthConfigModel.service_name == config.service
+    ).first()
+    
+    if existing:
+        # Update existing
+        existing.client_id = config.client_id
+        existing.client_secret = config.client_secret
+        existing.additional_config = config.additional_config
+        existing.is_configured = True
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        oauth_config = existing
+    else:
+        # Create new
+        oauth_config = OAuthConfigModel(
+            user_id=current_user.id,
+            service_name=config.service,
+            client_id=config.client_id,
+            client_secret=config.client_secret,
+            additional_config=config.additional_config,
+            is_configured=True
+        )
+        db.add(oauth_config)
+        db.commit()
+        db.refresh(oauth_config)
+    
+    # Return masked client_id for security
+    response = OAuthConfigResponse(
+        id=oauth_config.id,
+        service=oauth_config.service_name,
+        client_id=oauth_config.client_id[:10] + "..." if len(oauth_config.client_id) > 10 else oauth_config.client_id,
+        is_configured=oauth_config.is_configured,
+        created_at=oauth_config.created_at
+    )
+    
+    return response
+
+
+@router.get("/config/{service}", response_model=OAuthConfigResponse)
+async def get_oauth_config(
+    service: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get OAuth configuration for a service"""
+    
+    config = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == current_user.id,
+        OAuthConfigModel.service_name == service
+    ).first()
+    
+    if not config:
+        raise HTTPException(status_code=404, detail=f"{service} configuration not found")
+    
+    # Return masked client_id for security
+    return OAuthConfigResponse(
+        id=config.id,
+        service=config.service_name,
+        client_id=config.client_id[:10] + "..." if len(config.client_id) > 10 else config.client_id,
+        is_configured=config.is_configured,
+        created_at=config.created_at
+    )
+
+
 # Google OAuth
 @router.get("/google/url")
-async def get_google_auth_url(current_user: User = Depends(get_current_user)):
-    """Get Google OAuth authorization URL"""
+async def get_google_auth_url(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get Google OAuth authorization URL using user's configured credentials"""
     
-    if not settings.GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=400, detail="Google OAuth not configured")
+    # Get user's OAuth config
+    oauth_config = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == current_user.id,
+        OAuthConfigModel.service_name == "google"
+    ).first()
+    
+    if not oauth_config or not oauth_config.is_configured:
+        raise HTTPException(
+            status_code=400, 
+            detail="Please configure your Google OAuth credentials first"
+        )
     
     scopes = [
         'https://www.googleapis.com/auth/gmail.readonly',
@@ -111,10 +200,13 @@ async def get_google_auth_url(current_user: User = Depends(get_current_user)):
         'https://www.googleapis.com/auth/userinfo.email'
     ]
     
+    # Use user's redirect URI or default
+    redirect_uri = oauth_config.additional_config.get('redirect_uri', settings.GOOGLE_REDIRECT_URI) if oauth_config.additional_config else settings.GOOGLE_REDIRECT_URI
+    
     auth_url = (
         f"https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={settings.GOOGLE_CLIENT_ID}&"
-        f"redirect_uri={settings.GOOGLE_REDIRECT_URI}&"
+        f"client_id={oauth_config.client_id}&"
+        f"redirect_uri={redirect_uri}&"
         f"response_type=code&"
         f"scope={' '.join(scopes)}&"
         f"access_type=offline&"
@@ -127,20 +219,34 @@ async def get_google_auth_url(current_user: User = Depends(get_current_user)):
 
 @router.get("/google/callback")
 async def google_oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
-    """Handle Google OAuth callback"""
+    """Handle Google OAuth callback using user's configured credentials"""
     
-    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=400, detail="Google OAuth not configured")
+    user_id = int(state)
+    user = db.query(User).filter(User.id == user_id).first()
     
-    # Exchange code for tokens
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get user's OAuth config
+    oauth_config = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == user_id,
+        OAuthConfigModel.service_name == "google"
+    ).first()
+    
+    if not oauth_config:
+        raise HTTPException(status_code=400, detail="Google OAuth not configured for this user")
+    
+    redirect_uri = oauth_config.additional_config.get('redirect_uri', settings.GOOGLE_REDIRECT_URI) if oauth_config.additional_config else settings.GOOGLE_REDIRECT_URI
+    
+    # Exchange code for tokens using user's credentials
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
                 "code": code,
-                "client_id": settings.GOOGLE_CLIENT_ID,
-                "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                "client_id": oauth_config.client_id,
+                "client_secret": oauth_config.client_secret,
+                "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code"
             }
         )
@@ -149,13 +255,6 @@ async def google_oauth_callback(code: str, state: str, db: Session = Depends(get
             raise HTTPException(status_code=400, detail="Failed to exchange code for tokens")
         
         tokens = response.json()
-    
-    # Save credentials
-    user_id = int(state)
-    user = db.query(User).filter(User.id == user_id).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
     
     # Check if credential exists
     credential = db.query(Credential).filter(
@@ -170,8 +269,8 @@ async def google_oauth_callback(code: str, state: str, db: Session = Depends(get
         credential.refresh_token = tokens.get('refresh_token', credential.refresh_token)
         credential.token_expiry = token_expiry
         credential.additional_data = {
-            'client_id': settings.GOOGLE_CLIENT_ID,
-            'client_secret': settings.GOOGLE_CLIENT_SECRET
+            'client_id': oauth_config.client_id,
+            'client_secret': oauth_config.client_secret
         }
     else:
         credential = Credential(
@@ -181,8 +280,8 @@ async def google_oauth_callback(code: str, state: str, db: Session = Depends(get
             refresh_token=tokens.get('refresh_token'),
             token_expiry=token_expiry,
             additional_data={
-                'client_id': settings.GOOGLE_CLIENT_ID,
-                'client_secret': settings.GOOGLE_CLIENT_SECRET
+                'client_id': oauth_config.client_id,
+                'client_secret': oauth_config.client_secret
             }
         )
         db.add(credential)
@@ -194,11 +293,23 @@ async def google_oauth_callback(code: str, state: str, db: Session = Depends(get
 
 # Slack OAuth
 @router.get("/slack/url")
-async def get_slack_auth_url(current_user: User = Depends(get_current_user)):
-    """Get Slack OAuth authorization URL"""
+async def get_slack_auth_url(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get Slack OAuth authorization URL using user's configured credentials"""
     
-    if not settings.SLACK_CLIENT_ID:
-        raise HTTPException(status_code=400, detail="Slack OAuth not configured")
+    # Get user's OAuth config
+    oauth_config = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == current_user.id,
+        OAuthConfigModel.service_name == "slack"
+    ).first()
+    
+    if not oauth_config or not oauth_config.is_configured:
+        raise HTTPException(
+            status_code=400,
+            detail="Please configure your Slack OAuth credentials first"
+        )
     
     scopes = [
         'chat:write',
@@ -211,10 +322,12 @@ async def get_slack_auth_url(current_user: User = Depends(get_current_user)):
         'mpim:history'
     ]
     
+    redirect_uri = oauth_config.additional_config.get('redirect_uri', settings.SLACK_REDIRECT_URI) if oauth_config.additional_config else settings.SLACK_REDIRECT_URI
+    
     auth_url = (
         f"https://slack.com/oauth/v2/authorize?"
-        f"client_id={settings.SLACK_CLIENT_ID}&"
-        f"redirect_uri={settings.SLACK_REDIRECT_URI}&"
+        f"client_id={oauth_config.client_id}&"
+        f"redirect_uri={redirect_uri}&"
         f"scope={','.join(scopes)}&"
         f"state={current_user.id}"
     )
@@ -224,20 +337,34 @@ async def get_slack_auth_url(current_user: User = Depends(get_current_user)):
 
 @router.get("/slack/callback")
 async def slack_oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
-    """Handle Slack OAuth callback"""
+    """Handle Slack OAuth callback using user's configured credentials"""
     
-    if not settings.SLACK_CLIENT_ID or not settings.SLACK_CLIENT_SECRET:
-        raise HTTPException(status_code=400, detail="Slack OAuth not configured")
+    user_id = int(state)
+    user = db.query(User).filter(User.id == user_id).first()
     
-    # Exchange code for tokens
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get user's OAuth config
+    oauth_config = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == user_id,
+        OAuthConfigModel.service_name == "slack"
+    ).first()
+    
+    if not oauth_config:
+        raise HTTPException(status_code=400, detail="Slack OAuth not configured for this user")
+    
+    redirect_uri = oauth_config.additional_config.get('redirect_uri', settings.SLACK_REDIRECT_URI) if oauth_config.additional_config else settings.SLACK_REDIRECT_URI
+    
+    # Exchange code for tokens using user's credentials
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://slack.com/api/oauth.v2.access",
             data={
                 "code": code,
-                "client_id": settings.SLACK_CLIENT_ID,
-                "client_secret": settings.SLACK_CLIENT_SECRET,
-                "redirect_uri": settings.SLACK_REDIRECT_URI
+                "client_id": oauth_config.client_id,
+                "client_secret": oauth_config.client_secret,
+                "redirect_uri": redirect_uri
             }
         )
         
@@ -248,13 +375,6 @@ async def slack_oauth_callback(code: str, state: str, db: Session = Depends(get_
         
         if not data.get('ok'):
             raise HTTPException(status_code=400, detail="Slack OAuth failed")
-    
-    # Save credentials
-    user_id = int(state)
-    user = db.query(User).filter(User.id == user_id).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
     
     credential = db.query(Credential).filter(
         Credential.user_id == user_id,
@@ -286,29 +406,37 @@ async def slack_oauth_callback(code: str, state: str, db: Session = Depends(get_
     return {"message": "Slack workspace connected successfully", "redirect": f"{settings.FRONTEND_URL}/dashboard"}
 
 
-# Azure OpenAI Configuration
+# Azure OpenAI Configuration  
 @router.post("/azure/configure")
 async def configure_azure_openai(
-    config: OAuthConfig,
+    config: OAuthConfigCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Configure Azure OpenAI credentials"""
     
-    credential = db.query(Credential).filter(
-        Credential.user_id == current_user.id,
-        Credential.service_name == "azure_openai"
+    # Store in oauth_configs table
+    oauth_config = db.query(OAuthConfigModel).filter(
+        OAuthConfigModel.user_id == current_user.id,
+        OAuthConfigModel.service_name == "azure_openai"
     ).first()
     
-    if credential:
-        credential.additional_data = config.additional_config
+    if oauth_config:
+        oauth_config.client_id = config.additional_config.get('endpoint', '')  # Store endpoint as client_id
+        oauth_config.client_secret = config.client_secret  # API key
+        oauth_config.additional_config = config.additional_config
+        oauth_config.is_configured = True
+        oauth_config.updated_at = datetime.utcnow()
     else:
-        credential = Credential(
+        oauth_config = OAuthConfigModel(
             user_id=current_user.id,
             service_name="azure_openai",
-            additional_data=config.additional_config
+            client_id=config.additional_config.get('endpoint', ''),
+            client_secret=config.client_secret,
+            additional_config=config.additional_config,
+            is_configured=True
         )
-        db.add(credential)
+        db.add(oauth_config)
     
     db.commit()
     
@@ -320,14 +448,31 @@ async def get_auth_status(current_user: User = Depends(get_current_user), db: Se
     """Get authentication status for all services"""
     
     credentials = db.query(Credential).filter(Credential.user_id == current_user.id).all()
+    oauth_configs = db.query(OAuthConfigModel).filter(OAuthConfigModel.user_id == current_user.id).all()
     
     status = {
-        'google': False,
-        'slack': False,
-        'azure_openai': False
+        'google': {
+            'configured': False,
+            'connected': False
+        },
+        'slack': {
+            'configured': False,
+            'connected': False
+        },
+        'azure_openai': {
+            'configured': False,
+            'connected': False
+        }
     }
     
+    # Check OAuth configs
+    for config in oauth_configs:
+        if config.service_name in status:
+            status[config.service_name]['configured'] = config.is_configured
+    
+    # Check credentials (tokens)
     for cred in credentials:
-        status[cred.service_name] = True
+        if cred.service_name in status:
+            status[cred.service_name]['connected'] = True
     
     return status

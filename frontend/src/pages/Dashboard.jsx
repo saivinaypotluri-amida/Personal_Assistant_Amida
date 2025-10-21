@@ -38,7 +38,13 @@ export default function Dashboard() {
   const fetchAuthStatus = async () => {
     try {
       const response = await api.get('/auth/status')
-      setAuthStatus(response.data)
+      // Handle new nested status format
+      const status = response.data
+      setAuthStatus({
+        google: status.google?.connected || false,
+        slack: status.slack?.connected || false,
+        azure_openai: status.azure_openai?.configured || false
+      })
     } catch (err) {
       console.error('Failed to fetch auth status:', err)
     }
@@ -152,10 +158,20 @@ export default function Dashboard() {
 
         {/* Service Status */}
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>
-            <Settings size={20} style={{ display: 'inline', marginRight: '0.5rem' }} />
-            Connected Services
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '600', margin: 0 }}>
+              <Settings size={20} style={{ display: 'inline', marginRight: '0.5rem' }} />
+              Connected Services
+            </h2>
+            <button 
+              className="btn btn-secondary"
+              onClick={() => navigate('/configure-oauth')}
+              style={{ fontSize: '0.875rem' }}
+            >
+              <Settings size={16} />
+              Configure Credentials
+            </button>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
             <div style={{
               padding: '1rem',
@@ -191,6 +207,9 @@ export default function Dashboard() {
                 </button>
               )}
             </div>
+          </div>
+          <div className="alert alert-info" style={{ marginTop: '1rem' }}>
+            <strong>💡 Tip:</strong> Click "Configure Credentials" to set up your own OAuth credentials for Google, Slack, and Azure OpenAI.
           </div>
         </div>
 
