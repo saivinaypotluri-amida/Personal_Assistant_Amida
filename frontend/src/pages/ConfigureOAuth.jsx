@@ -21,14 +21,14 @@ export default function ConfigureOAuth() {
   const [googleConfig, setGoogleConfig] = useState({
     client_id: '',
     client_secret: '',
-    redirect_uri: 'http://localhost:8000/api/auth/google/callback'
+    redirect_uri: 'https://your-ngrok-url.ngrok-free.dev/api/auth/google/callback'
   })
 
   // Slack credentials
   const [slackConfig, setSlackConfig] = useState({
     client_id: '',
     client_secret: '',
-    redirect_uri: 'http://localhost:8000/api/auth/slack/callback',
+    redirect_uri: 'https://your-ngrok-url.ngrok-free.dev/api/auth/slack/callback',
     bot_token: '',
     signing_secret: ''
   })

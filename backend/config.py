@@ -11,13 +11,13 @@ class Settings(BaseSettings):
     # Google OAuth
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
+    GOOGLE_REDIRECT_URI: str = "https://localhost:8000/api/auth/google/callback"
     
     # Slack OAuth
     SLACK_CLIENT_ID: Optional[str] = None
     SLACK_CLIENT_SECRET: Optional[str] = None
     SLACK_SIGNING_SECRET: Optional[str] = None
-    SLACK_REDIRECT_URI: str = "http://localhost:8000/api/auth/slack/callback"
+    SLACK_REDIRECT_URI: str = "https://localhost:8000/api/auth/slack/callback"
     
     # Azure OpenAI
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
