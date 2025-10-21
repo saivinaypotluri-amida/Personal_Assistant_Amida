@@ -33,12 +33,16 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == user_data.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
     
+    # Check if this is the first user - if so, make them admin
+    user_count = db.query(User).count()
+    is_first_user = user_count == 0
+    
     # Create new user
     db_user = User(
         email=user_data.email,
         username=user_data.username,
         hashed_password=get_password_hash(user_data.password),
-        is_admin=user_data.is_admin
+        is_admin=user_data.is_admin or is_first_user  # First user is always admin
     )
     
     db.add(db_user)

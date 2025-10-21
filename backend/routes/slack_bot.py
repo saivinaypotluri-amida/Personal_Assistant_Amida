@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 from sqlalchemy.orm import Session
+from datetime import timedelta
 import os
 
 from config import settings
@@ -11,6 +12,7 @@ from services.slack_service import SlackService
 from services.gmail_service import GmailService
 from services.calendar_service import CalendarService
 from services.llm_service import LLMService
+from services.command_parser import CommandParser
 
 router = APIRouter(prefix="/api/slack", tags=["Slack Bot"])
 
@@ -46,7 +48,14 @@ def get_credential(db: Session, user_id: int, service: str):
 
 # Slack command: /emailsummary  
 async def handle_email_summary(ack, command, client):
-    """Handle /emailsummary command"""
+    """
+    Handle /emailsummary command with natural language parsing
+    Examples:
+    - /emailsummary
+    - /emailsummary last 3 days
+    - /emailsummary yesterday
+    - /emailsummary from Jan 1 to Jan 5
+    """
     await ack()
     
     db = SessionLocal()
@@ -75,21 +84,29 @@ async def handle_email_summary(ack, command, client):
             )
             return
         
-        # Parse command text (e.g., "7 days" or "today")
-        text = command.get('text', '').lower()
-        days = 1  # default to today
+        # Parse command text using LLM
+        text = command.get('text', '').strip()
         
-        if 'days' in text:
-            try:
-                days = int(text.split()[0])
-            except:
-                days = 1
-        
-        # Post loading message
-        response = await client.chat_postMessage(
+        # Show parsing message
+        parsing_msg = await client.chat_postMessage(
             channel=command['channel_id'],
-            text="🔄 Fetching and summarizing your emails... This may take a moment.",
+            text=f"🤖 Understanding your request: '{text}'..." if text else "🔄 Fetching today's emails...",
             thread_ts=command.get('thread_ts')
+        )
+        
+        # Use LLM to parse the command
+        parser = CommandParser()
+        parsed = await parser.parse_email_summary_command(text)
+        
+        days = parsed.get('days', 1)
+        start_date = parsed.get('start_date')
+        end_date = parsed.get('end_date')
+        
+        # Update to loading message
+        await client.chat_update(
+            channel=command['channel_id'],
+            ts=parsing_msg['ts'],
+            text="🔄 Fetching and summarizing your emails... This may take a moment."
         )
         
         # Initialize services
@@ -103,7 +120,11 @@ async def handle_email_summary(ack, command, client):
         llm_service = LLMService()
         
         # Fetch and summarize emails
-        emails = await gmail_service.get_emails(days=days)
+        emails = await gmail_service.get_emails(
+            days=days,
+            start_date=start_date,
+            end_date=end_date
+        )
         
         summaries = []
         for email in emails:
@@ -128,10 +149,18 @@ async def handle_email_summary(ack, command, client):
         # Format and post to Slack
         slack_blocks = await llm_service.format_slack_message(summaries)
         
+        # Format summary message
+        if days:
+            summary_text = f"📧 Email summary for the last {days} day(s)"
+        elif start_date and end_date:
+            summary_text = f"📧 Email summary from {start_date} to {end_date}"
+        else:
+            summary_text = "📧 Email summary"
+        
         await client.chat_update(
             channel=command['channel_id'],
-            ts=response['ts'],
-            text=f"📧 Email summary for the last {days} day(s)",
+            ts=parsing_msg['ts'],
+            text=summary_text,
             blocks=slack_blocks
         )
     
@@ -141,7 +170,13 @@ async def handle_email_summary(ack, command, client):
 
 # Slack command: /schedule
 async def handle_schedule_meeting(ack, command, client):
-    """Handle /schedule command"""
+    """
+    Handle /schedule command with natural language parsing
+    Examples:
+    - /schedule meeting with john@example.com for 30 minutes
+    - /schedule john@ex.com and jane@ex.com for 1 hour tomorrow at 2pm called Team Sync
+    - /schedule john@ex.com,jane@ex.com 30 Project Review
+    """
     await ack()
     
     db = SessionLocal()
@@ -170,32 +205,52 @@ async def handle_schedule_meeting(ack, command, client):
             )
             return
         
-        # Parse command text
-        # Format: /schedule email1@example.com,email2@example.com 30 "Meeting Title"
-        text = command.get('text', '')
-        parts = text.split()
+        # Parse command text using LLM
+        text = command.get('text', '').strip()
         
-        if len(parts) < 2:
+        if not text:
             await client.chat_postMessage(
                 channel=command['channel_id'],
-                text="❌ Usage: `/schedule email1,email2 duration_minutes [title]`\nExample: `/schedule john@amida.com,jane@amida.com 30 Team Sync`",
+                text="❌ Please provide meeting details.\n\n*Examples:*\n"
+                     "• `/schedule meeting with john@example.com for 30 minutes`\n"
+                     "• `/schedule john@ex.com and jane@ex.com for 1 hour called Team Sync`\n"
+                     "• `/schedule john@ex.com,jane@ex.com 30 Project Review`",
                 thread_ts=command.get('thread_ts')
             )
             return
         
-        attendees = parts[0].split(',')
-        try:
-            duration = int(parts[1])
-        except:
-            duration = 30
-        
-        title = ' '.join(parts[2:]) if len(parts) > 2 else "Meeting"
-        
-        # Post loading message
-        response = await client.chat_postMessage(
+        # Show parsing message
+        parsing_msg = await client.chat_postMessage(
             channel=command['channel_id'],
-            text="🔄 Finding available time slot and scheduling meeting...",
+            text=f"🤖 Understanding your request: '{text}'...",
             thread_ts=command.get('thread_ts')
+        )
+        
+        # Use LLM to parse the command
+        try:
+            parser = CommandParser()
+            parsed = await parser.parse_schedule_command(text)
+            
+            attendees = parsed['attendees']
+            duration = parsed['duration_minutes']
+            title = parsed['title']
+            specific_date = parsed.get('date')
+            specific_time = parsed.get('time')
+        except ValueError as e:
+            await client.chat_update(
+                channel=command['channel_id'],
+                ts=parsing_msg['ts'],
+                text=f"❌ {str(e)}\n\n*Examples:*\n"
+                     "• `/schedule john@example.com for 30 minutes`\n"
+                     "• `/schedule john@ex.com and jane@ex.com for 1 hour called Team Sync`"
+            )
+            return
+        
+        # Update to loading message
+        await client.chat_update(
+            channel=command['channel_id'],
+            ts=parsing_msg['ts'],
+            text=f"🔄 Scheduling '{title}' with {', '.join(attendees)}..."
         )
         
         # Initialize calendar service
@@ -206,13 +261,31 @@ async def handle_schedule_meeting(ack, command, client):
             'client_secret': google_cred.additional_data.get('client_secret')
         })
         
-        # Find next available slot
-        slot = await calendar_service.find_next_available_slot(attendees, duration)
+        # Find next available slot or use specific time
+        if specific_date and specific_time:
+            from datetime import datetime
+            start_dt = datetime.fromisoformat(f"{specific_date}T{specific_time}")
+            end_dt = start_dt + timedelta(minutes=duration)
+            slot = {
+                'start': start_dt.isoformat() + 'Z',
+                'end': end_dt.isoformat() + 'Z'
+            }
+            # Check for conflicts
+            conflicts = await calendar_service.check_conflicts(attendees, slot['start'], slot['end'])
+            if conflicts:
+                await client.chat_update(
+                    channel=command['channel_id'],
+                    ts=parsing_msg['ts'],
+                    text=f"⚠️ Time conflict detected with: {', '.join(conflicts)}\nPlease choose a different time."
+                )
+                return
+        else:
+            slot = await calendar_service.find_next_available_slot(attendees, duration)
         
         if not slot:
             await client.chat_update(
                 channel=command['channel_id'],
-                ts=response['ts'],
+                ts=parsing_msg['ts'],
                 text="❌ No available time slots found in the next 7 days for all attendees."
             )
             return
@@ -250,14 +323,14 @@ async def handle_schedule_meeting(ack, command, client):
             
             await client.chat_update(
                 channel=command['channel_id'],
-                ts=response['ts'],
+                ts=parsing_msg['ts'],
                 text="Meeting scheduled!",
                 blocks=blocks
             )
         else:
             await client.chat_update(
                 channel=command['channel_id'],
-                ts=response['ts'],
+                ts=parsing_msg['ts'],
                 text="❌ Failed to create meeting. Please try again."
             )
     
